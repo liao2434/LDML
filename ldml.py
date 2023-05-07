@@ -76,9 +76,15 @@ class LocalizedDML:
             raise TypeError('QTE estimation only accept signle treatment variable. '
                             f'obj_dml_data.d_cols {str(obj_dml_data.d_cols)} was passed.')
         self.dataset = obj_dml_data
+        
+        if not method_prop:
+            method_prop=copy.deepcopy(method_ipw)
+        if not method_cdf:
+            method_cdf=copy.deepcopy(method_ipw)
 
         self.methods={'method_ipw':method_ipw,'method_prop':method_prop,'method_cdf':method_cdf}
         self.predict_methods={}
+        
         for name,learner in self.methods.items():
             if not hasattr(learner, 'fit'):
                 raise TypeError(f'{name}:{str(learner)} has no method .fit().')

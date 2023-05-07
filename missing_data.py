@@ -5,7 +5,7 @@ from sklearn.base import is_classifier,is_regressor
 from sklearn.model_selection import StratifiedKFold
 from scipy.optimize import fsolve
 from drf import drf
-from sklearn.multioutput import MultiOutputRegressor
+from sklearn.linear_model import LinearRegression
 
 import numpy as np
 import pandas as pd
@@ -16,15 +16,14 @@ def element_squaredot(arr):
     return np.apply_along_axis(lambda x:np.outer(x,x),1,arr)
 
 class MissingData(ABC):
-    def __init__(self,data,y_col,x_col,model,K,second_model=None):
+    def __init__(self,data,y_col,x_col,model,K):
         self.data=copy.deepcopy(data)
         self.y_col=y_col
         self.x_cols=x_col
         self.z_cols=[]
         
         self.model=model
-        if second_model==None:
-            self.second_model=model
+        self.second_model=LinearRegression()
         
         self.K=K
         self.type=''
@@ -76,7 +75,9 @@ class MissingData(ABC):
                     f'Missing variable(s): {missing_variables}\n' \
                     f'Non-missing independent variable(s): {no_missing_x}\n' \
                     f'No. Observations: {self.data.shape[0]}\n'\
-                    f'Missing num: {missing_num}\n'
+                    f'Missing num: {missing_num}\n'\
+                    '-----------------------\n'\
+                    f'Using model:{self.model.__str__()}'
         return data_info
 
     def model_check(self):    
@@ -137,7 +138,7 @@ class MissingDataLinear(MissingData):
             psi_b+=X.T.dot(R*(Y-mu)/lambda_+mu)/len(test)
 
         coef=inv(psi_a).dot(psi_b)#main para to be estimated
-        print(coef)
+        result=pd.DataFrame(coef,index=form_x,columns=['coef'])
 
         J0=psi_a/self.K
         PSI2=pd.DataFrame(0,index=form_x,columns=form_x)
@@ -158,7 +159,10 @@ class MissingDataLinear(MissingData):
         PSI2=PSI2/self.K
         sigma2=inv(J0).dot(PSI2).dot(inv(J0))/data.shape[0]
     
-        return (coef,np.diagonal(np.sqrt(sigma2)),sigma2)
+        #return (coef,np.diagonal(np.sqrt(sigma2)),sigma2)
+        #sigma2 is a covariance matrix which contains negative value
+        result['ste']=np.sqrt(np.diagonal(sigma2))
+        return result
     
     def missing_x(self):
         data=self.data
@@ -198,7 +202,7 @@ class MissingDataLinear(MissingData):
 
             XXT=element_squaredot(train_set[form_x].values)
             XXT=XXT.reshape(-1,len(form_x)**2)
-            mu2_model = MultiOutputRegressor(self.second_model).fit(train_set[form_yz], XXT)
+            mu2_model = self.second_model.fit(train_set[form_yz], XXT)
             mu2=mu2_model.predict(data.take(test)[form_yz])
             mu2=mu2.reshape(-1,len(form_x),len(form_x))#vector
             mu2_dic[str(i)]=mu2
@@ -212,10 +216,10 @@ class MissingDataLinear(MissingData):
             psi_b=psi_b+pd.concat([pd.Series(sum(Y*(R*(X-mu1)/lambda_+mu1)),index=form_x),pd.Series((Z.T.dot(Y)).flatten(),index=form_z)],axis=0)/len(test)
             
         coef=inv(psi_a).dot(psi_b)
-        coef=pd.DataFrame(coef,index=form_x+form_z)
+        result=pd.DataFrame(coef,index=form_x+form_z,columns=['coef'])
         
-        beta=coef.loc[form_x][0].values
-        gamma=coef.loc[form_z][0].values
+        beta=result.loc[form_x]['coef'].values
+        gamma=result.loc[form_z]['coef'].values
 
         J0=psi_a/K
         PSI2=pd.DataFrame(0,index=form_x+form_z,columns=form_x+form_z)
@@ -240,7 +244,9 @@ class MissingDataLinear(MissingData):
         PSI2=PSI2/K
         sigma2=inv(J0).dot(PSI2).dot(inv(J0))/data.shape[0]
     
-        return (coef,np.diagonal(np.sqrt(sigma2)),sigma2)
+        #return (coef,np.diagonal(np.sqrt(sigma2)),sigma2)
+        result['ste']=np.sqrt(np.diagonal(sigma2))
+        return result
 
 class MissingDataLogistics(MissingData):
     def __init__(self,data,y_col,x_col,model,K):
@@ -284,9 +290,6 @@ class MissingDataLogistics(MissingData):
         return result
     
     def missing_x(self):
-        if not is_regressor(self.second_model):
-            raise ValueError('Second model must be a regressor')
-
         data=self.data
         form_x=self.x_cols
         form_z=self.z_cols
